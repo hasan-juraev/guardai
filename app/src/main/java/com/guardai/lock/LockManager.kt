@@ -15,7 +15,16 @@ class LockManager(context: Context) {
 
     fun isLocked(packageName: String, now: Long = System.currentTimeMillis()): Boolean {
         val expiry = prefs.getLong(packageName, 0L)
+        if (expiry <= now && expiry != 0L) {
+            prefs.edit().remove(packageName).apply()
+            return false
+        }
         return expiry > now
+    }
+
+    fun expiresAt(packageName: String): Long? {
+        val expiry = prefs.getLong(packageName, 0L)
+        return expiry.takeIf { it > 0L }
     }
 
     fun unlockAll() {

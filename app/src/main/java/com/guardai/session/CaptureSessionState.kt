@@ -10,6 +10,7 @@ data class CaptureUiState(
     val accessibilityGranted: Boolean = false,
     val capturedFrameCount: Long = 0,
     val captureResolution: String = "",
+    val currentPackageName: String = "",
 )
 
 object CaptureSessionState {
@@ -30,6 +31,7 @@ object CaptureSessionState {
             statusMessage = message,
             capturedFrameCount = 0,
             captureResolution = "",
+            currentPackageName = "",
         )
     }
 
@@ -52,6 +54,18 @@ object CaptureSessionState {
             capturedFrameCount = capturedFrameCount,
             captureResolution = captureResolution,
             statusMessage = statusMessage,
+        )
+    }
+
+    fun updateCurrentPackage(packageName: String?) {
+        mutableState.value = mutableState.value.copy(
+            currentPackageName = packageName.orEmpty(),
+        )
+    }
+
+    fun updateStatus(message: String) {
+        mutableState.value = mutableState.value.copy(
+            statusMessage = message,
         )
     }
 }

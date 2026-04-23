@@ -1,6 +1,7 @@
 package com.guardai.service
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context.WINDOW_SERVICE
 import android.content.Context
@@ -22,6 +23,7 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.guardai.R
 import com.guardai.ScreenCaptureNotification
+import com.guardai.ai.DetectionSummary
 import com.guardai.ai.NsfwClassifier
 import com.guardai.detection.DetectionCoordinator
 import com.guardai.detection.DetectionOutcome
@@ -64,6 +66,7 @@ class ScreenCaptureService : Service() {
     }
 
     override fun onDestroy() {
+        detectionCoordinator.clearOverlay()
         cleanupCaptureResources()
         mediaProjection?.let { projection ->
             projectionCallback?.let(projection::unregisterCallback)
@@ -182,8 +185,7 @@ class ScreenCaptureService : Service() {
     }
 
     private fun runInference(bitmap: Bitmap) {
-        val result = classifier.classify(bitmap)
-        if (result == null) {
+        val result: DetectionSummary = classifier.classify(bitmap) ?: run {
             if (capturedFrames == 1L || capturedFrames % METRICS_UPDATE_INTERVAL == 0L) {
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
@@ -205,14 +207,14 @@ class ScreenCaptureService : Service() {
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
                     captureResolution = "${bitmap.width}x${bitmap.height}",
-                    statusMessage = "Blur triggered at ${(result.confidence * 100).toInt()}% confidence.",
+                    statusMessage = "Blur triggered by ${result.topLabel.name} at ${(result.confidence * 100).toInt()}%.",
                 )
             }
             is DetectionOutcome.Locked -> {
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
                     captureResolution = "${bitmap.width}x${bitmap.height}",
-                    statusMessage = "Package locked after ${(result.confidence * 100).toInt()}% confidence.",
+                    statusMessage = "Package locked by ${result.topLabel.name} at ${(result.confidence * 100).toInt()}%.",
                 )
             }
         }
@@ -246,10 +248,25 @@ class ScreenCaptureService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        val stopIntent = Intent(this, ScreenCaptureService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
         return NotificationCompat.Builder(this, ScreenCaptureNotification.CHANNEL_ID)
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setContentTitle(getString(R.string.service_notification_title))
             .setContentText(getString(R.string.service_notification_text))
+            .addAction(
+                0,
+                getString(R.string.service_notification_action_stop),
+                stopPendingIntent,
+            )
             .setOngoing(true)
             .build()
     }

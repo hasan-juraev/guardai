@@ -1,10 +1,12 @@
 package com.guardai.detection
 
 import android.content.Context
+import com.guardai.accessibility.AccessibilityEjector
+import com.guardai.ai.DetectionAction
+import com.guardai.ai.DetectionSummary
 import com.guardai.lock.LockManager
+import com.guardai.lock.LockConfig
 import com.guardai.overlay.OverlayManager
-import com.guardai.ai.ClassificationResult
-import com.guardai.ai.NsfwLabel
 
 class DetectionCoordinator(context: Context) {
 
@@ -13,20 +15,28 @@ class DetectionCoordinator(context: Context) {
 
     fun handleClassification(
         packageName: String?,
-        result: ClassificationResult,
-        lockDurationMs: Long = 10 * 60 * 1000L,
+        result: DetectionSummary,
+        lockDurationMs: Long = LockConfig.DEFAULT_LOCK_DURATION_MS,
     ): DetectionOutcome {
-        if (!shouldBlur(result)) {
+        if (result.action == DetectionAction.NONE) {
+            overlayManager.hide()
             return DetectionOutcome.NoAction
         }
 
-        overlayManager.show("Explicit content detected")
+        overlayManager.show(
+            if (result.matchedLabels.isNotEmpty()) {
+                "Detected ${result.matchedLabels.joinToString { it.name }}"
+            } else {
+                "Explicit content detected"
+            },
+        )
 
-        if (shouldLock(result) && !packageName.isNullOrBlank()) {
+        if (result.action == DetectionAction.LOCK && !packageName.isNullOrBlank()) {
             lockManager.lockPackage(
                 packageName = packageName,
                 expiresAt = System.currentTimeMillis() + lockDurationMs,
             )
+            AccessibilityEjector.goHome()
             return DetectionOutcome.Locked(packageName, result.confidence)
         }
 
@@ -35,26 +45,6 @@ class DetectionCoordinator(context: Context) {
 
     fun clearOverlay() {
         overlayManager.hide()
-    }
-
-    private fun shouldBlur(result: ClassificationResult): Boolean {
-        return when (result.label) {
-            NsfwLabel.SEXY -> result.confidence >= BLUR_THRESHOLD
-            NsfwLabel.PORN, NsfwLabel.HENTAI -> result.confidence >= LOCK_THRESHOLD
-            else -> false
-        }
-    }
-
-    private fun shouldLock(result: ClassificationResult): Boolean {
-        return when (result.label) {
-            NsfwLabel.PORN, NsfwLabel.HENTAI -> result.confidence >= LOCK_THRESHOLD
-            else -> false
-        }
-    }
-
-    companion object {
-        const val BLUR_THRESHOLD = 0.70f
-        const val LOCK_THRESHOLD = 0.85f
     }
 }
 

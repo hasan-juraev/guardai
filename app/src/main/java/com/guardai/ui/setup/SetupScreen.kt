@@ -28,10 +28,13 @@ fun SetupScreen(
     statusMessage: String,
     capturedFrameCount: Long,
     captureResolution: String,
+    currentPackageName: String,
     onRequestOverlay: () -> Unit,
     onRequestAccessibility: () -> Unit,
     onRequestProjection: () -> Unit,
     onStopProtection: () -> Unit,
+    onLockCurrentApp: () -> Unit,
+    onUnlockAll: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -63,6 +66,10 @@ fun SetupScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(text = "Captured frames: $capturedFrameCount")
                     }
+                    if (currentPackageName.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "Current app: $currentPackageName")
+                    }
                 }
             }
 
@@ -85,6 +92,12 @@ fun SetupScreen(
                 ready = captureActive,
                 buttonLabel = if (captureActive) "Stop protection" else "Start capture session",
                 onClick = if (captureActive) onStopProtection else onRequestProjection,
+            )
+
+            DebugCard(
+                currentPackageName = currentPackageName,
+                onLockCurrentApp = onLockCurrentApp,
+                onUnlockAll = onUnlockAll,
             )
         }
     }
@@ -114,6 +127,43 @@ private fun StatusCard(
                 Button(onClick = onClick) {
                     Text(buttonLabel)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugCard(
+    currentPackageName: String,
+    onLockCurrentApp: () -> Unit,
+    onUnlockAll: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = "Debug actions", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (currentPackageName.isBlank()) {
+                    "No app tracked yet. Open the target app, then return here."
+                } else {
+                    "Ready to lock: $currentPackageName"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onLockCurrentApp,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = currentPackageName.isNotBlank(),
+            ) {
+                Text("Lock Current App")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onUnlockAll,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Unlock All")
             }
         }
     }

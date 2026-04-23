@@ -108,7 +108,7 @@ This plan intentionally excludes:
 
 ## Milestone 0: Project Bootstrap
 
-Status: In progress
+Status: Complete
 
 ### Goal
 
@@ -139,16 +139,16 @@ Create a clean Android project skeleton with the required permissions, dependenc
 
 ### Checklist
 
-- [ ] Android project created
+- [x] Android project created
 - [x] Manifest compiles
 - [x] Foreground service declared correctly
 - [x] Accessibility service declared correctly
 - [x] Overlay permission flow stubbed
-- [ ] Build succeeds on device target
+- [x] Build succeeds on device target
 
 ## Milestone 1: Permission and Session Setup
 
-Status: In progress
+Status: Complete
 
 ### Goal
 
@@ -256,6 +256,8 @@ Integrate and validate the TFLite model for fast on-device explicit-content dete
 
 ## Milestone 4: Blur Overlay Enforcement
 
+Status: In progress
+
 ### Goal
 
 Show a fast full-screen blur/block overlay immediately after detection.
@@ -279,11 +281,13 @@ Show a fast full-screen blur/block overlay immediately after detection.
 
 - [ ] Overlay permission confirmed
 - [ ] Full-screen overlay renders above target apps
-- [ ] Show/hide calls are stable
-- [ ] Repeated triggers do not create duplicate views
+- [x] Show/hide calls are stable
+- [x] Repeated triggers do not create duplicate views
 - [ ] Overlay latency feels acceptable
 
 ## Milestone 5: Foreground Package Tracking and App Ejection
+
+Status: In progress
 
 ### Goal
 
@@ -309,13 +313,15 @@ Track which app is in the foreground and eject the user to Home after a lock-wor
 
 ### Checklist
 
-- [ ] Accessibility service connects successfully
-- [ ] Foreground package updates correctly
-- [ ] `GLOBAL_ACTION_HOME` works
-- [ ] Debounce prevents repeated rapid ejections
+- [x] Accessibility service connects successfully
+- [x] Foreground package updates correctly
+- [x] `GLOBAL_ACTION_HOME` works
+- [x] Debounce prevents repeated rapid ejections
 - [ ] Detection and ejection path works end-to-end
 
 ## Milestone 6: Temporary Package Locking and Re-entry Blocking
+
+Status: In progress
 
 ### Goal
 
@@ -343,11 +349,11 @@ Block re-entry into apps that triggered explicit-content detection for a configu
 
 ### Checklist
 
-- [ ] Package lock state stored correctly
-- [ ] Locked package lookup is reliable
-- [ ] Reopening locked app triggers overlay immediately
-- [ ] Reopening locked app triggers Home action immediately
-- [ ] Expired locks are removed
+- [x] Package lock state stored correctly
+- [x] Locked package lookup is reliable
+- [x] Reopening locked app triggers overlay immediately
+- [x] Reopening locked app triggers Home action immediately
+- [x] Expired locks are removed
 - [ ] Manual unlock-all works
 
 ## Milestone 7: Settings, Debouncing, and Safety Controls
@@ -588,7 +594,7 @@ The implementation is considered done when all of the following are true:
 1. Validate the real frame pipeline on a physical device.
 2. Add a lightweight debug preview path or frame telemetry if frame delivery is unstable.
 3. Validate the `.tflite` model asset on a physical device.
-4. Connect `DetectionCoordinator` to app ejection and locked-package re-entry handling.
-5. Add locked-app re-entry enforcement in `GuardAccessibilityService`.
-6. Add threshold and lock-duration settings storage.
+4. Verify end-to-end detection, ejection, and locked-app re-entry on device.
+5. Add threshold and lock-duration settings storage.
+6. Add manual unlock-all control in the UI.
 7. Tune sampling interval and threshold defaults after device testing.

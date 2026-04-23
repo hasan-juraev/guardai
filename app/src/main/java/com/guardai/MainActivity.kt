@@ -11,13 +11,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import com.guardai.lock.LockConfig
+import com.guardai.lock.LockManager
 import com.guardai.service.ScreenCaptureService
 import com.guardai.session.CaptureSessionState
+import com.guardai.tracking.CurrentAppTracker
 import com.guardai.ui.setup.SetupScreen
 import com.guardai.ui.theme.GuardAITheme
 import com.guardai.util.PermissionHelper
 
 class MainActivity : ComponentActivity() {
+    private val lockManager by lazy { LockManager(this) }
 
     private val projectionManager by lazy {
         getSystemService(MediaProjectionManager::class.java)
@@ -49,10 +53,13 @@ class MainActivity : ComponentActivity() {
                     statusMessage = sessionState.statusMessage,
                     capturedFrameCount = sessionState.capturedFrameCount,
                     captureResolution = sessionState.captureResolution,
+                    currentPackageName = sessionState.currentPackageName,
                     onRequestOverlay = ::openOverlaySettings,
                     onRequestAccessibility = ::openAccessibilitySettings,
                     onRequestProjection = ::requestProjection,
                     onStopProtection = { ScreenCaptureService.stop(this) },
+                    onLockCurrentApp = ::lockCurrentAppForDebug,
+                    onUnlockAll = ::unlockAll,
                 )
             }
         }
@@ -81,4 +88,30 @@ class MainActivity : ComponentActivity() {
     private fun requestProjection() {
         projectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
+
+    private fun lockCurrentAppForDebug() {
+        val packageName = CurrentAppTracker.currentPackage.value
+        if (packageName.isNullOrBlank()) {
+            CaptureSessionState.updateStatus("No foreground app tracked yet. Open the target app first.")
+            return
+        }
+
+        if (packageName == packageName()) {
+            CaptureSessionState.updateStatus("GuardAI cannot lock itself. Open another app first.")
+            return
+        }
+
+        lockManager.lockPackage(
+            packageName = packageName,
+            expiresAt = System.currentTimeMillis() + LockConfig.DEFAULT_LOCK_DURATION_MS,
+        )
+        CaptureSessionState.updateStatus("Locked $packageName for debug. Reopen it to test re-blocking.")
+    }
+
+    private fun unlockAll() {
+        lockManager.unlockAll()
+        CaptureSessionState.updateStatus("All app locks cleared.")
+    }
+
+    private fun packageName(): String = applicationContext.packageName
 }

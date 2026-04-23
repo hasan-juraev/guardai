@@ -1,5 +1,6 @@
 package com.guardai.tracking
 
+import com.guardai.session.CaptureSessionState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -10,6 +11,7 @@ object CurrentAppTracker {
     fun update(packageName: String?) {
         if (!packageName.isNullOrBlank()) {
             mutablePackage.value = packageName
+            CaptureSessionState.updateCurrentPackage(packageName)
         }
     }
 }
