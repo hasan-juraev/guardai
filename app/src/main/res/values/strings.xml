@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">GuardAI</string>
+    <string name="accessibility_service_label">GuardAI App Guard</string>
+    <string name="accessibility_service_description">Tracks the foreground app so GuardAI can lock and eject blocked apps.</string>
+    <string name="service_channel_name">GuardAI Protection</string>
+    <string name="service_channel_description">Keeps the personal content protection session active.</string>
+    <string name="service_notification_title">GuardAI active</string>
+    <string name="service_notification_text">Screen protection session is running.</string>
+</resources>

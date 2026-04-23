@@ -1,0 +1,84 @@
+package com.guardai
+
+import android.app.Activity
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
+import android.net.Uri
+import android.os.Bundle
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import com.guardai.service.ScreenCaptureService
+import com.guardai.session.CaptureSessionState
+import com.guardai.ui.setup.SetupScreen
+import com.guardai.ui.theme.GuardAITheme
+import com.guardai.util.PermissionHelper
+
+class MainActivity : ComponentActivity() {
+
+    private val projectionManager by lazy {
+        getSystemService(MediaProjectionManager::class.java)
+    }
+
+    private val projectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            ScreenCaptureService.startWithProjection(
+                context = this,
+                resultCode = result.resultCode,
+                data = result.data!!,
+            )
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setContent {
+            GuardAITheme {
+                val sessionState by CaptureSessionState.state.collectAsState()
+
+                SetupScreen(
+                    overlayGranted = sessionState.overlayGranted,
+                    accessibilityGranted = sessionState.accessibilityGranted,
+                    captureActive = sessionState.isRunning,
+                    statusMessage = sessionState.statusMessage,
+                    capturedFrameCount = sessionState.capturedFrameCount,
+                    captureResolution = sessionState.captureResolution,
+                    onRequestOverlay = ::openOverlaySettings,
+                    onRequestAccessibility = ::openAccessibilitySettings,
+                    onRequestProjection = ::requestProjection,
+                    onStopProtection = { ScreenCaptureService.stop(this) },
+                )
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        CaptureSessionState.refreshPermissions(
+            overlayGranted = PermissionHelper.hasOverlay(this),
+            accessibilityGranted = PermissionHelper.hasAccessibility(this),
+        )
+    }
+
+    private fun openOverlaySettings() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName"),
+        )
+        startActivity(intent)
+    }
+
+    private fun openAccessibilitySettings() {
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }
+
+    private fun requestProjection() {
+        projectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+    }
+}
