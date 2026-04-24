@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
                     accessibilityGranted = sessionState.accessibilityGranted,
                     captureActive = sessionState.isRunning,
                     statusMessage = sessionState.statusMessage,
+                    diagnostics = sessionState.diagnostics,
                     capturedFrameCount = sessionState.capturedFrameCount,
                     captureResolution = sessionState.captureResolution,
                     currentPackageName = sessionState.currentPackageName,

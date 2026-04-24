@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.asStateFlow
 data class CaptureUiState(
     val isRunning: Boolean = false,
     val statusMessage: String = "Protection is idle.",
+    val diagnostics: String = "",
     val overlayGranted: Boolean = false,
     val accessibilityGranted: Boolean = false,
     val capturedFrameCount: Long = 0,
@@ -21,6 +22,7 @@ object CaptureSessionState {
         mutableState.value = mutableState.value.copy(
             isRunning = true,
             statusMessage = message,
+            diagnostics = "",
             capturedFrameCount = 0,
         )
     }
@@ -66,6 +68,12 @@ object CaptureSessionState {
     fun updateStatus(message: String) {
         mutableState.value = mutableState.value.copy(
             statusMessage = message,
+        )
+    }
+
+    fun updateDiagnostics(message: String) {
+        mutableState.value = mutableState.value.copy(
+            diagnostics = message,
         )
     }
 }

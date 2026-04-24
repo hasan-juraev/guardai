@@ -2,6 +2,7 @@ package com.guardai.detection
 
 import android.content.Context
 import com.guardai.accessibility.AccessibilityEjector
+import com.guardai.accessibility.EjectResult
 import com.guardai.ai.DetectionAction
 import com.guardai.ai.DetectionSummary
 import com.guardai.lock.LockManager
@@ -36,8 +37,8 @@ class DetectionCoordinator(context: Context) {
                 packageName = packageName,
                 expiresAt = System.currentTimeMillis() + lockDurationMs,
             )
-            AccessibilityEjector.goHome()
-            return DetectionOutcome.Locked(packageName, result.confidence)
+            val ejectResult = AccessibilityEjector.eject()
+            return DetectionOutcome.Locked(packageName, result.confidence, ejectResult)
         }
 
         return DetectionOutcome.Blurred(result.confidence)
@@ -51,5 +52,9 @@ class DetectionCoordinator(context: Context) {
 sealed interface DetectionOutcome {
     data object NoAction : DetectionOutcome
     data class Blurred(val confidence: Float) : DetectionOutcome
-    data class Locked(val packageName: String, val confidence: Float) : DetectionOutcome
+    data class Locked(
+        val packageName: String,
+        val confidence: Float,
+        val ejectResult: EjectResult,
+    ) : DetectionOutcome
 }

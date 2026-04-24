@@ -18,8 +18,22 @@ object AccessibilityEjector {
         }
     }
 
-    fun goHome(): Boolean {
-        val service = serviceRef?.get() ?: return false
-        return service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+    fun eject(): EjectResult {
+        val service = serviceRef?.get() ?: return EjectResult(success = false, mode = "NO_SERVICE")
+        if (service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) {
+            return EjectResult(success = true, mode = "HOME")
+        }
+
+        val backWorked = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+        val homeWorked = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        return EjectResult(
+            success = backWorked || homeWorked,
+            mode = if (backWorked || homeWorked) "BACK_HOME" else "FAILED",
+        )
     }
 }
+
+data class EjectResult(
+    val success: Boolean,
+    val mode: String,
+)

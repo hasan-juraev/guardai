@@ -61,6 +61,9 @@ class GuardAccessibilityService : AccessibilityService() {
         val now = SystemClock.elapsedRealtime()
         if (now - lastEjectTimestamp < LockConfig.EJECT_COOLDOWN_MS) return
         lastEjectTimestamp = now
-        performGlobalAction(GLOBAL_ACTION_HOME)
+        val ejectResult = AccessibilityEjector.eject()
+        CaptureSessionState.updateDiagnostics(
+            "Locked app reopen eject=${ejectResult.mode} success=${ejectResult.success}",
+        )
     }
 }

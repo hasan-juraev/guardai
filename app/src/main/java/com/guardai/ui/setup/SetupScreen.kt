@@ -26,6 +26,7 @@ fun SetupScreen(
     accessibilityGranted: Boolean,
     captureActive: Boolean,
     statusMessage: String,
+    diagnostics: String,
     capturedFrameCount: Long,
     captureResolution: String,
     currentPackageName: String,
@@ -58,6 +59,13 @@ fun SetupScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(text = statusMessage)
+                    if (diagnostics.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = diagnostics,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     if (captureResolution.isNotBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(text = "Resolution: $captureResolution")

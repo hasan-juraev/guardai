@@ -234,6 +234,10 @@ Integrate and validate the TFLite model for fast on-device explicit-content dete
    - normalize
    - tensor formatting
 4. Implement inference method and result mapping.
+   - detector candidate filtering
+   - per-label thresholds
+   - minimum-area gating
+   - NMS for overlapping detections
 5. Define detection thresholds:
    - suspicious threshold for immediate blur
    - lock threshold for blur + eject + lock
@@ -247,8 +251,8 @@ Integrate and validate the TFLite model for fast on-device explicit-content dete
 
 ### Checklist
 
-- [ ] Model loads successfully
-- [ ] Inference returns stable results
+- [x] Model loads successfully
+- [x] Inference returns stable results
 - [ ] Thresholds configurable
 - [x] Warm-up path implemented
 - [ ] Sample test images evaluated
@@ -317,6 +321,7 @@ Track which app is in the foreground and eject the user to Home after a lock-wor
 - [x] Foreground package updates correctly
 - [x] `GLOBAL_ACTION_HOME` works
 - [x] Debounce prevents repeated rapid ejections
+- [x] Home-action fallback and diagnostics added
 - [ ] Detection and ejection path works end-to-end
 
 ## Milestone 6: Temporary Package Locking and Re-entry Blocking
@@ -358,6 +363,8 @@ Block re-entry into apps that triggered explicit-content detection for a configu
 
 ## Milestone 7: Settings, Debouncing, and Safety Controls
 
+Status: In progress
+
 ### Goal
 
 Stabilize user behavior with basic settings and guardrails.
@@ -385,11 +392,13 @@ Stabilize user behavior with basic settings and guardrails.
 - [ ] Threshold settings persist
 - [ ] Lock duration setting persists
 - [ ] Blur-only mode works
-- [ ] Ejection cooldown works
+- [x] Ejection cooldown works
 - [ ] Allowlist works if implemented
-- [ ] Debug info visible in development build
+- [x] Debug info visible in development build
 
 ## Milestone 8: Performance Tuning on Real Device
+
+Status: In progress
 
 ### Goal
 
@@ -404,6 +413,8 @@ Reduce latency and battery cost while keeping acceptable detection quality.
    - overlay show
    - Home action
 2. Tune frame sampling rate.
+   - temporal smoothing for video
+   - blur hold cooldown to avoid flicker
 3. Tune bitmap resolution.
 4. Tune model thresholds.
 5. Reuse buffers and avoid repeated bitmap allocations.
@@ -417,7 +428,7 @@ Reduce latency and battery cost while keeping acceptable detection quality.
 ### Checklist
 
 - [ ] Latency measured on target phone
-- [ ] Sampling FPS tuned
+- [x] Sampling FPS tuned
 - [ ] Bitmap size tuned
 - [ ] Excess allocations reduced
 - [ ] Battery impact observed

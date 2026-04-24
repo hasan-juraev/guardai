@@ -9,7 +9,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.TextView
 
 class OverlayManager(context: Context) {
 
@@ -25,19 +24,7 @@ class OverlayManager(context: Context) {
             if (overlayView != null) return@post
 
             val view = FrameLayout(appContext).apply {
-                setBackgroundColor(0xCC000000.toInt())
-                addView(
-                    TextView(appContext).apply {
-                        text = message
-                        setTextColor(0xFFFFFFFF.toInt())
-                        textSize = 22f
-                        gravity = Gravity.CENTER
-                    },
-                    FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                    ),
-                )
+                setBackgroundColor(0xFF000000.toInt())
             }
 
             windowManager.addView(view, layoutParams())

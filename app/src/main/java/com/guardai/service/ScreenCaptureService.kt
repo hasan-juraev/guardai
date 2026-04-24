@@ -23,6 +23,7 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.guardai.R
 import com.guardai.ScreenCaptureNotification
+import com.guardai.ai.DetectionAction
 import com.guardai.ai.DetectionSummary
 import com.guardai.ai.NsfwClassifier
 import com.guardai.detection.DetectionCoordinator
@@ -45,6 +46,9 @@ class ScreenCaptureService : Service() {
     private var lastFrameTimestamp = 0L
     private var capturedFrames = 0L
     private var latestBitmap: Bitmap? = null
+    private var blurFrameStreak = 0
+    private var lockFrameStreak = 0
+    private var blurHoldUntil = 0L
     private lateinit var classifier: NsfwClassifier
     private lateinit var detectionCoordinator: DetectionCoordinator
 
@@ -99,6 +103,7 @@ class ScreenCaptureService : Service() {
         val callback = object : MediaProjection.Callback() {
             override fun onStop() {
                 CaptureSessionState.markStopped("Projection session ended.")
+                CaptureSessionState.updateDiagnostics("MediaProjection onStop callback fired.")
                 stopSelf()
             }
         }
@@ -155,6 +160,9 @@ class ScreenCaptureService : Service() {
             captureResolution = "${captureWidth}x${captureHeight}",
             statusMessage = "Frame capture active.",
         )
+        CaptureSessionState.updateDiagnostics(
+            "VirtualDisplay=${captureWidth}x${captureHeight} density=$displayDensity sample=${SAMPLE_INTERVAL_MS}ms",
+        )
     }
 
     private fun processLatestImage(reader: ImageReader) {
@@ -196,26 +204,65 @@ class ScreenCaptureService : Service() {
             return
         }
 
-        when (
-            detectionCoordinator.handleClassification(
-                packageName = CurrentAppTracker.currentPackage.value,
-                result = result,
-            )
-        ) {
+        val now = SystemClock.elapsedRealtime()
+        updateTemporalState(result, now)
+        val smoothedResult = result.toSmoothedResult(
+            blurFrameStreak = blurFrameStreak,
+            lockFrameStreak = lockFrameStreak,
+        )
+        if (smoothedResult.action == DetectionAction.NONE && now > blurHoldUntil) {
+            detectionCoordinator.clearOverlay()
+        }
+
+        val outcome = detectionCoordinator.handleClassification(
+            packageName = CurrentAppTracker.currentPackage.value,
+            result = smoothedResult,
+        )
+
+        when (outcome) {
             is DetectionOutcome.NoAction -> Unit
             is DetectionOutcome.Blurred -> {
+                blurHoldUntil = now + BLUR_HOLD_MS
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
                     captureResolution = "${bitmap.width}x${bitmap.height}",
-                    statusMessage = "Blur triggered by ${result.topLabel.name} at ${(result.confidence * 100).toInt()}%.",
+                    statusMessage = "Blur triggered by ${smoothedResult.topLabel.name} at ${(smoothedResult.confidence * 100).toInt()}%.",
+                )
+                CaptureSessionState.updateDiagnostics(
+                    "streak blur=$blurFrameStreak lock=$lockFrameStreak labels=${smoothedResult.matchedLabels.joinToString()}",
                 )
             }
             is DetectionOutcome.Locked -> {
+                blurHoldUntil = now + BLUR_HOLD_MS
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
                     captureResolution = "${bitmap.width}x${bitmap.height}",
-                    statusMessage = "Package locked by ${result.topLabel.name} at ${(result.confidence * 100).toInt()}%.",
+                    statusMessage = "Package locked by ${smoothedResult.topLabel.name} at ${(smoothedResult.confidence * 100).toInt()}%.",
                 )
+                CaptureSessionState.updateDiagnostics(
+                    "lock streak=$lockFrameStreak eject=${outcome.ejectResult.mode} success=${outcome.ejectResult.success}",
+                )
+            }
+        }
+    }
+
+    private fun updateTemporalState(result: DetectionSummary, now: Long) {
+        when (result.action) {
+            DetectionAction.LOCK -> {
+                lockFrameStreak += 1
+                blurFrameStreak += 1
+                blurHoldUntil = now + BLUR_HOLD_MS
+            }
+            DetectionAction.BLUR -> {
+                blurFrameStreak += 1
+                lockFrameStreak = 0
+                blurHoldUntil = now + BLUR_HOLD_MS
+            }
+            DetectionAction.NONE -> {
+                if (now > blurHoldUntil) {
+                    blurFrameStreak = 0
+                }
+                lockFrameStreak = 0
             }
         }
     }
@@ -237,6 +284,9 @@ class ScreenCaptureService : Service() {
 
         capturedFrames = 0
         lastFrameTimestamp = 0L
+        blurFrameStreak = 0
+        lockFrameStreak = 0
+        blurHoldUntil = 0L
     }
 
     private fun currentDisplayMetrics(): android.util.DisplayMetrics {
@@ -276,8 +326,11 @@ class ScreenCaptureService : Service() {
         private const val ACTION_STOP = "com.guardai.action.STOP_CAPTURE"
         private const val EXTRA_RESULT_CODE = "extra_result_code"
         private const val EXTRA_RESULT_DATA = "extra_result_data"
-        private const val SAMPLE_INTERVAL_MS = 250L
+        private const val SAMPLE_INTERVAL_MS = 125L
         private const val METRICS_UPDATE_INTERVAL = 10L
+        private const val BLUR_HOLD_MS = 1_500L
+        private const val BLUR_TRIGGER_FRAMES = 1
+        private const val LOCK_TRIGGER_FRAMES = 2
 
         fun startWithProjection(
             context: Context,
@@ -299,6 +352,19 @@ class ScreenCaptureService : Service() {
             context.startService(intent)
         }
     }
+}
+
+private fun DetectionSummary.toSmoothedResult(
+    blurFrameStreak: Int,
+    lockFrameStreak: Int,
+): DetectionSummary {
+    val smoothedAction = when {
+        action == DetectionAction.LOCK && lockFrameStreak >= 2 -> DetectionAction.LOCK
+        action == DetectionAction.BLUR && blurFrameStreak >= 1 -> DetectionAction.BLUR
+        action == DetectionAction.LOCK && blurFrameStreak >= 1 -> DetectionAction.BLUR
+        else -> DetectionAction.NONE
+    }
+    return copy(action = smoothedAction)
 }
 
 private fun Image.toBitmap(reusable: Bitmap?): Bitmap {
