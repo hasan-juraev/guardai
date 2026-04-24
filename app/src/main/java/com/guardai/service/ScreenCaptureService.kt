@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
@@ -28,6 +29,7 @@ import com.guardai.ai.DetectionSummary
 import com.guardai.ai.NsfwClassifier
 import com.guardai.detection.DetectionCoordinator
 import com.guardai.detection.DetectionOutcome
+import com.guardai.lock.LockConfig
 import com.guardai.session.CaptureSessionState
 import com.guardai.tracking.CurrentAppTracker
 
@@ -49,8 +51,16 @@ class ScreenCaptureService : Service() {
     private var blurFrameStreak = 0
     private var lockFrameStreak = 0
     private var blurHoldUntil = 0L
+    private var restartAttempts = 0
+    private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var classifier: NsfwClassifier
     private lateinit var detectionCoordinator: DetectionCoordinator
+    private val watchdogRunnable = object : Runnable {
+        override fun run() {
+            checkCaptureHealth()
+            mainHandler.postDelayed(this, LockConfig.WATCHDOG_INTERVAL_MS)
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -67,9 +77,11 @@ class ScreenCaptureService : Service() {
         classifier = NsfwClassifier(applicationContext)
         detectionCoordinator = DetectionCoordinator(applicationContext)
         classifier.warmUp()
+        mainHandler.postDelayed(watchdogRunnable, LockConfig.WATCHDOG_INTERVAL_MS)
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(watchdogRunnable)
         detectionCoordinator.clearOverlay()
         cleanupCaptureResources()
         mediaProjection?.let { projection ->
@@ -94,6 +106,7 @@ class ScreenCaptureService : Service() {
         val projectionData = intent.parcelableIntent(EXTRA_RESULT_DATA)
         if (resultCode == 0 || projectionData == null) {
             CaptureSessionState.markStopped("Projection permission data was missing.")
+            CaptureSessionState.updateDiagnostics("Projection start failed: missing permission intent payload.")
             stopSelf()
             return
         }
@@ -117,6 +130,7 @@ class ScreenCaptureService : Service() {
         captureWidth = metrics.widthPixels
         captureHeight = metrics.heightPixels
         displayDensity = metrics.densityDpi
+        restartAttempts = 0
 
         CaptureSessionState.markStarted("Projection granted. Initializing frame capture.")
         startCapturePipeline()
@@ -226,21 +240,38 @@ class ScreenCaptureService : Service() {
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
                     captureResolution = "${bitmap.width}x${bitmap.height}",
-                    statusMessage = "Blur triggered by ${smoothedResult.topLabel.name} at ${(smoothedResult.confidence * 100).toInt()}%.",
+                    statusMessage = "Blocking content at ${(smoothedResult.confidence * 100).toInt()}%.",
                 )
                 CaptureSessionState.updateDiagnostics(
-                    "streak blur=$blurFrameStreak lock=$lockFrameStreak labels=${smoothedResult.matchedLabels.joinToString()}",
+                    "blur streak=$blurFrameStreak lock=$lockFrameStreak top=${smoothedResult.topLabel.name} labels=${smoothedResult.matchedLabels.joinToString()}",
+                )
+            }
+            is DetectionOutcome.LockHeld -> {
+                blurHoldUntil = now + BLUR_HOLD_MS
+                outcome.ejectResult?.let {
+                    CaptureSessionState.updateLastEjectResult("${it.mode} success=${it.success}")
+                }
+                CaptureSessionState.updateCaptureMetrics(
+                    capturedFrameCount = capturedFrames,
+                    captureResolution = "${bitmap.width}x${bitmap.height}",
+                    statusMessage = "Holding block on locked app.",
+                )
+                CaptureSessionState.updateDiagnostics(
+                    "lock held pkg=${outcome.packageName} eject=${outcome.ejectResult?.mode ?: "PENDING"} success=${outcome.ejectResult?.success ?: false}",
                 )
             }
             is DetectionOutcome.Locked -> {
                 blurHoldUntil = now + BLUR_HOLD_MS
+                CaptureSessionState.updateLastEjectResult(
+                    "${outcome.ejectResult.mode} success=${outcome.ejectResult.success}",
+                )
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
                     captureResolution = "${bitmap.width}x${bitmap.height}",
-                    statusMessage = "Package locked by ${smoothedResult.topLabel.name} at ${(smoothedResult.confidence * 100).toInt()}%.",
+                    statusMessage = "Locked current app at ${(smoothedResult.confidence * 100).toInt()}%.",
                 )
                 CaptureSessionState.updateDiagnostics(
-                    "lock streak=$lockFrameStreak eject=${outcome.ejectResult.mode} success=${outcome.ejectResult.success}",
+                    "lock streak=$lockFrameStreak top=${smoothedResult.topLabel.name} eject=${outcome.ejectResult.mode} success=${outcome.ejectResult.success}",
                 )
             }
         }
@@ -289,6 +320,27 @@ class ScreenCaptureService : Service() {
         blurHoldUntil = 0L
     }
 
+    private fun checkCaptureHealth() {
+        if (mediaProjection == null || !CaptureSessionState.state.value.isRunning) return
+        val now = SystemClock.elapsedRealtime()
+        if (lastFrameTimestamp == 0L) return
+        val frameGap = now - lastFrameTimestamp
+        if (frameGap < LockConfig.FRAME_STALL_TIMEOUT_MS) return
+
+        if (restartAttempts >= MAX_PIPELINE_RESTARTS) {
+            CaptureSessionState.updateDiagnostics(
+                "Capture stalled for ${frameGap}ms. Projection likely ended; restart capture session.",
+            )
+            return
+        }
+
+        restartAttempts += 1
+        CaptureSessionState.updateDiagnostics(
+            "Capture stalled for ${frameGap}ms. Restarting capture pipeline attempt $restartAttempts/$MAX_PIPELINE_RESTARTS.",
+        )
+        startCapturePipeline()
+    }
+
     private fun currentDisplayMetrics(): android.util.DisplayMetrics {
         val metrics = android.util.DisplayMetrics()
         val windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -329,8 +381,7 @@ class ScreenCaptureService : Service() {
         private const val SAMPLE_INTERVAL_MS = 125L
         private const val METRICS_UPDATE_INTERVAL = 10L
         private const val BLUR_HOLD_MS = 1_500L
-        private const val BLUR_TRIGGER_FRAMES = 1
-        private const val LOCK_TRIGGER_FRAMES = 2
+        private const val MAX_PIPELINE_RESTARTS = 3
 
         fun startWithProjection(
             context: Context,

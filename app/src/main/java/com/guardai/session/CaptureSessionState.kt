@@ -7,6 +7,7 @@ data class CaptureUiState(
     val isRunning: Boolean = false,
     val statusMessage: String = "Protection is idle.",
     val diagnostics: String = "",
+    val lastEjectResult: String = "",
     val overlayGranted: Boolean = false,
     val accessibilityGranted: Boolean = false,
     val capturedFrameCount: Long = 0,
@@ -74,6 +75,12 @@ object CaptureSessionState {
     fun updateDiagnostics(message: String) {
         mutableState.value = mutableState.value.copy(
             diagnostics = message,
+        )
+    }
+
+    fun updateLastEjectResult(message: String) {
+        mutableState.value = mutableState.value.copy(
+            lastEjectResult = message,
         )
     }
 }

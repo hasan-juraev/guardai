@@ -1,10 +1,20 @@
 package com.guardai.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import com.guardai.lock.LockConfig
 import java.lang.ref.WeakReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 object AccessibilityEjector {
     private var serviceRef: WeakReference<AccessibilityService>? = null
+    @Volatile private var pendingPackage: String? = null
+    @Volatile private var pendingUntilElapsed: Long = 0L
+    private const val MAIN_THREAD_TIMEOUT_MS = 300L
+    private const val HOME_RETRY_DELAY_MS = 80L
 
     fun register(service: AccessibilityService) {
         serviceRef = WeakReference(service)
@@ -18,18 +28,72 @@ object AccessibilityEjector {
         }
     }
 
-    fun eject(): EjectResult {
-        val service = serviceRef?.get() ?: return EjectResult(success = false, mode = "NO_SERVICE")
-        if (service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) {
-            return EjectResult(success = true, mode = "HOME")
+    fun requestEject(packageName: String) {
+        pendingPackage = packageName
+        pendingUntilElapsed = SystemClock.elapsedRealtime() + LockConfig.EJECT_RETRY_WINDOW_MS
+    }
+
+    fun maybeEjectForeground(packageName: String): EjectResult? {
+        val target = pendingPackage ?: return null
+        if (SystemClock.elapsedRealtime() > pendingUntilElapsed) {
+            clearPending()
+            return null
+        }
+        if (target != packageName) {
+            return null
         }
 
-        val backWorked = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-        val homeWorked = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
-        return EjectResult(
-            success = backWorked || homeWorked,
-            mode = if (backWorked || homeWorked) "BACK_HOME" else "FAILED",
-        )
+        val result = eject()
+        if (result.success) {
+            clearPending()
+        }
+        return result
+    }
+
+    fun clearPending() {
+        pendingPackage = null
+        pendingUntilElapsed = 0L
+    }
+
+    fun eject(): EjectResult {
+        val service = serviceRef?.get() ?: return EjectResult(success = false, mode = "NO_SERVICE")
+        return runOnServiceMainThread(service) {
+            if (service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) {
+                return@runOnServiceMainThread EjectResult(success = true, mode = "HOME")
+            }
+
+            val backWorked = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            if (backWorked) {
+                SystemClock.sleep(HOME_RETRY_DELAY_MS)
+            }
+            val homeWorked = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+            EjectResult(
+                success = homeWorked,
+                mode = if (homeWorked) "BACK_HOME" else if (backWorked) "BACK_ONLY" else "FAILED",
+            )
+        }
+    }
+
+    private fun runOnServiceMainThread(
+        service: AccessibilityService,
+        block: () -> EjectResult,
+    ): EjectResult {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return block()
+        }
+
+        val latch = CountDownLatch(1)
+        val resultHolder = arrayOfNulls<EjectResult>(1)
+        Handler(Looper.getMainLooper()).post {
+            resultHolder[0] = block()
+            latch.countDown()
+        }
+
+        return if (latch.await(MAIN_THREAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            resultHolder[0] ?: EjectResult(success = false, mode = "NO_RESULT")
+        } else {
+            EjectResult(success = false, mode = "TIMEOUT")
+        }
     }
 }
 

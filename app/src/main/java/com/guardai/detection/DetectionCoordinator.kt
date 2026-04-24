@@ -20,6 +20,11 @@ class DetectionCoordinator(context: Context) {
         lockDurationMs: Long = LockConfig.DEFAULT_LOCK_DURATION_MS,
     ): DetectionOutcome {
         if (result.action == DetectionAction.NONE) {
+            if (!packageName.isNullOrBlank() && lockManager.isLocked(packageName)) {
+                overlayManager.show()
+                val ejectResult = AccessibilityEjector.maybeEjectForeground(packageName)
+                return DetectionOutcome.LockHeld(packageName, ejectResult)
+            }
             overlayManager.hide()
             return DetectionOutcome.NoAction
         }
@@ -37,6 +42,7 @@ class DetectionCoordinator(context: Context) {
                 packageName = packageName,
                 expiresAt = System.currentTimeMillis() + lockDurationMs,
             )
+            AccessibilityEjector.requestEject(packageName)
             val ejectResult = AccessibilityEjector.eject()
             return DetectionOutcome.Locked(packageName, result.confidence, ejectResult)
         }
@@ -52,6 +58,10 @@ class DetectionCoordinator(context: Context) {
 sealed interface DetectionOutcome {
     data object NoAction : DetectionOutcome
     data class Blurred(val confidence: Float) : DetectionOutcome
+    data class LockHeld(
+        val packageName: String,
+        val ejectResult: EjectResult?,
+    ) : DetectionOutcome
     data class Locked(
         val packageName: String,
         val confidence: Float,

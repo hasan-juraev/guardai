@@ -41,11 +41,21 @@ class GuardAccessibilityService : AccessibilityService() {
         if (foregroundPackage == packageName) return
         CurrentAppTracker.update(foregroundPackage)
 
+        AccessibilityEjector.maybeEjectForeground(foregroundPackage)?.let { ejectResult ->
+            CaptureSessionState.updateLastEjectResult(
+                "${ejectResult.mode} success=${ejectResult.success}",
+            )
+            CaptureSessionState.updateDiagnostics(
+                "Pending eject retry pkg=$foregroundPackage mode=${ejectResult.mode} success=${ejectResult.success}",
+            )
+        }
+
         if (lockManager.isLocked(foregroundPackage)) {
             overlayManager.show("Blocked app")
             ejectIfNeeded()
         } else {
             overlayManager.hide()
+            AccessibilityEjector.clearPending()
         }
     }
 
@@ -62,6 +72,9 @@ class GuardAccessibilityService : AccessibilityService() {
         if (now - lastEjectTimestamp < LockConfig.EJECT_COOLDOWN_MS) return
         lastEjectTimestamp = now
         val ejectResult = AccessibilityEjector.eject()
+        CaptureSessionState.updateLastEjectResult(
+            "${ejectResult.mode} success=${ejectResult.success}",
+        )
         CaptureSessionState.updateDiagnostics(
             "Locked app reopen eject=${ejectResult.mode} success=${ejectResult.success}",
         )

@@ -7,15 +7,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -27,6 +34,7 @@ fun SetupScreen(
     captureActive: Boolean,
     statusMessage: String,
     diagnostics: String,
+    lastEjectResult: String,
     capturedFrameCount: Long,
     captureResolution: String,
     currentPackageName: String,
@@ -37,6 +45,23 @@ fun SetupScreen(
     onLockCurrentApp: () -> Unit,
     onUnlockAll: () -> Unit,
 ) {
+    var showEjectAlert by rememberSaveable(lastEjectResult) {
+        mutableStateOf(lastEjectResult.isNotBlank())
+    }
+
+    if (showEjectAlert && lastEjectResult.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { showEjectAlert = false },
+            title = { Text("Eject result") },
+            text = { Text(lastEjectResult) },
+            confirmButton = {
+                TextButton(onClick = { showEjectAlert = false }) {
+                    Text("Dismiss")
+                }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -51,6 +76,13 @@ fun SetupScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (lastEjectResult.isNotBlank()) {
+                EjectResultCard(
+                    result = lastEjectResult,
+                    onDismissAlert = { showEjectAlert = false },
+                )
+            }
+
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
@@ -63,6 +95,13 @@ fun SetupScreen(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = diagnostics,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (lastEjectResult.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Last eject result: $lastEjectResult",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -107,6 +146,48 @@ fun SetupScreen(
                 onLockCurrentApp = onLockCurrentApp,
                 onUnlockAll = onUnlockAll,
             )
+        }
+    }
+}
+
+@Composable
+private fun EjectResultCard(
+    result: String,
+    onDismissAlert: () -> Unit,
+) {
+    val success = result.contains("success=true")
+    val containerColor = if (success) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.errorContainer
+    }
+    val contentColor = if (success) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onErrorContainer
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = if (success) "Latest eject succeeded" else "Latest eject failed",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = result,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(onClick = onDismissAlert) {
+                Text("Dismiss alert")
+            }
         }
     }
 }
