@@ -6,6 +6,7 @@ import android.app.Service
 import android.content.Context.WINDOW_SERVICE
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -30,8 +31,10 @@ import com.guardai.ai.NsfwClassifier
 import com.guardai.detection.DetectionCoordinator
 import com.guardai.detection.DetectionOutcome
 import com.guardai.lock.LockConfig
+import com.guardai.metrics.MetricsLogger
 import com.guardai.session.CaptureSessionState
 import com.guardai.tracking.CurrentAppTracker
+import java.util.UUID
 
 class ScreenCaptureService : Service() {
 
@@ -52,6 +55,8 @@ class ScreenCaptureService : Service() {
     private var lockFrameStreak = 0
     private var blurHoldUntil = 0L
     private var restartAttempts = 0
+    private var sessionId = "none"
+    private var metricsSessionActive = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var classifier: NsfwClassifier
     private lateinit var detectionCoordinator: DetectionCoordinator
@@ -90,6 +95,7 @@ class ScreenCaptureService : Service() {
         }
         mediaProjection = null
         projectionCallback = null
+        closeMetricsSession("service_destroyed")
         CaptureSessionState.markStopped()
         super.onDestroy()
     }
@@ -102,11 +108,18 @@ class ScreenCaptureService : Service() {
             return
         }
 
+        sessionId = UUID.randomUUID().toString().substring(0, 8)
+        MetricsLogger.beginSession(sessionId)
+        metricsSessionActive = true
+        logBatteryEvent("session_start_battery")
+
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
         val projectionData = intent.parcelableIntent(EXTRA_RESULT_DATA)
         if (resultCode == 0 || projectionData == null) {
+            MetricsLogger.logEvent(event = "projection_start_failed")
             CaptureSessionState.markStopped("Projection permission data was missing.")
             CaptureSessionState.updateDiagnostics("Projection start failed: missing permission intent payload.")
+            closeMetricsSession("missing_projection_payload")
             stopSelf()
             return
         }
@@ -117,6 +130,7 @@ class ScreenCaptureService : Service() {
             override fun onStop() {
                 CaptureSessionState.markStopped("Projection session ended.")
                 CaptureSessionState.updateDiagnostics("MediaProjection onStop callback fired.")
+                closeMetricsSession("projection_callback_stop")
                 stopSelf()
             }
         }
@@ -132,6 +146,14 @@ class ScreenCaptureService : Service() {
         displayDensity = metrics.densityDpi
         restartAttempts = 0
 
+        MetricsLogger.logEvent(
+            event = "projection_started",
+            fields = mapOf(
+                "width" to captureWidth,
+                "height" to captureHeight,
+                "density_dpi" to displayDensity,
+            ),
+        )
         CaptureSessionState.markStarted("Projection granted. Initializing frame capture.")
         startCapturePipeline()
     }
@@ -188,11 +210,20 @@ class ScreenCaptureService : Service() {
 
         val image = reader.acquireLatestImage() ?: return
         try {
+            val frameNumber = capturedFrames + 1
             val bitmap = image.toBitmap(reusable = latestBitmap)
             latestBitmap = bitmap
             lastFrameTimestamp = now
-            capturedFrames += 1
-            runInference(bitmap)
+            capturedFrames = frameNumber
+            MetricsLogger.logEvent(
+                event = "frame_acquired",
+                fields = mapOf(
+                    "frame" to frameNumber,
+                    "width" to bitmap.width,
+                    "height" to bitmap.height,
+                ),
+            )
+            runInference(bitmap, frameNumber)
 
             if (capturedFrames == 1L || capturedFrames % METRICS_UPDATE_INTERVAL == 0L) {
                 CaptureSessionState.updateCaptureMetrics(
@@ -206,8 +237,20 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    private fun runInference(bitmap: Bitmap) {
+    private fun runInference(bitmap: Bitmap, frameNumber: Long) {
+        val inferenceStartNs = SystemClock.elapsedRealtimeNanos()
+        MetricsLogger.logEvent(
+            event = "inference_start",
+            fields = mapOf("frame" to frameNumber),
+        )
         val result: DetectionSummary = classifier.classify(bitmap) ?: run {
+            MetricsLogger.logEvent(
+                event = "inference_skipped",
+                fields = mapOf(
+                    "frame" to frameNumber,
+                    "reason" to "model_not_ready",
+                ),
+            )
             if (capturedFrames == 1L || capturedFrames % METRICS_UPDATE_INTERVAL == 0L) {
                 CaptureSessionState.updateCaptureMetrics(
                     capturedFrameCount = capturedFrames,
@@ -217,12 +260,32 @@ class ScreenCaptureService : Service() {
             }
             return
         }
+        val inferenceEndNs = SystemClock.elapsedRealtimeNanos()
+        MetricsLogger.logEvent(
+            event = "inference_end",
+            fields = mapOf(
+                "frame" to frameNumber,
+                "latency_ms" to nanosToMillis(inferenceEndNs - inferenceStartNs),
+            ),
+        )
 
         val now = SystemClock.elapsedRealtime()
         updateTemporalState(result, now)
         val smoothedResult = result.toSmoothedResult(
             blurFrameStreak = blurFrameStreak,
             lockFrameStreak = lockFrameStreak,
+        )
+        MetricsLogger.logEvent(
+            event = "decision_${smoothedResult.action.name.lowercase()}",
+            fields = mapOf(
+                "frame" to frameNumber,
+                "package" to CurrentAppTracker.currentPackage.value,
+                "confidence" to smoothedResult.confidence,
+                "top_label" to smoothedResult.topLabel.name,
+                "labels" to smoothedResult.matchedLabels.joinToString("|") { it.name },
+                "blur_streak" to blurFrameStreak,
+                "lock_streak" to lockFrameStreak,
+            ),
         )
         if (smoothedResult.action == DetectionAction.NONE && now > blurHoldUntil) {
             detectionCoordinator.clearOverlay()
@@ -328,6 +391,10 @@ class ScreenCaptureService : Service() {
         if (frameGap < LockConfig.FRAME_STALL_TIMEOUT_MS) return
 
         if (restartAttempts >= MAX_PIPELINE_RESTARTS) {
+            MetricsLogger.logEvent(
+                event = "capture_stall_terminal",
+                fields = mapOf("frame_gap_ms" to frameGap),
+            )
             CaptureSessionState.updateDiagnostics(
                 "Capture stalled for ${frameGap}ms. Projection likely ended; restart capture session.",
             )
@@ -335,10 +402,54 @@ class ScreenCaptureService : Service() {
         }
 
         restartAttempts += 1
+        MetricsLogger.logEvent(
+            event = "capture_pipeline_restart",
+            fields = mapOf(
+                "attempt" to restartAttempts,
+                "frame_gap_ms" to frameGap,
+            ),
+        )
         CaptureSessionState.updateDiagnostics(
             "Capture stalled for ${frameGap}ms. Restarting capture pipeline attempt $restartAttempts/$MAX_PIPELINE_RESTARTS.",
         )
         startCapturePipeline()
+    }
+
+    private fun logProjectionStopped(reason: String) {
+        if (sessionId == "none") return
+        MetricsLogger.logEvent(
+            event = "projection_stopped",
+            fields = mapOf("reason" to reason),
+        )
+    }
+
+    private fun closeMetricsSession(reason: String) {
+        if (!metricsSessionActive) return
+        logProjectionStopped(reason)
+        logBatteryEvent("session_stop_battery")
+        MetricsLogger.endSession(reason)
+        metricsSessionActive = false
+        sessionId = "none"
+    }
+
+    private fun logBatteryEvent(event: String) {
+        val batteryState = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return
+        val level = batteryState.getIntExtra("level", -1)
+        val scale = batteryState.getIntExtra("scale", -1)
+        if (level < 0 || scale <= 0) return
+
+        MetricsLogger.logEvent(
+            event = event,
+            fields = mapOf(
+                "battery_level" to level,
+                "battery_scale" to scale,
+                "battery_pct" to (level * 100f / scale),
+            ),
+        )
+    }
+
+    private fun nanosToMillis(durationNs: Long): Double {
+        return durationNs / 1_000_000.0
     }
 
     private fun currentDisplayMetrics(): android.util.DisplayMetrics {

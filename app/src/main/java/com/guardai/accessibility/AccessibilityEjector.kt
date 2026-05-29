@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import com.guardai.lock.LockConfig
+import com.guardai.metrics.MetricsLogger
 import java.lang.ref.WeakReference
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -31,11 +32,22 @@ object AccessibilityEjector {
     fun requestEject(packageName: String) {
         pendingPackage = packageName
         pendingUntilElapsed = SystemClock.elapsedRealtime() + LockConfig.EJECT_RETRY_WINDOW_MS
+        MetricsLogger.logEvent(
+            event = "eject_requested",
+            fields = mapOf(
+                "package" to packageName,
+                "retry_window_ms" to LockConfig.EJECT_RETRY_WINDOW_MS,
+            ),
+        )
     }
 
     fun maybeEjectForeground(packageName: String): EjectResult? {
         val target = pendingPackage ?: return null
         if (SystemClock.elapsedRealtime() > pendingUntilElapsed) {
+            MetricsLogger.logEvent(
+                event = "eject_pending_expired",
+                fields = mapOf("package" to target),
+            )
             clearPending()
             return null
         }
@@ -51,13 +63,20 @@ object AccessibilityEjector {
     }
 
     fun clearPending() {
+        val target = pendingPackage
         pendingPackage = null
         pendingUntilElapsed = 0L
+        if (target != null) {
+            MetricsLogger.logEvent(
+                event = "eject_pending_cleared",
+                fields = mapOf("package" to target),
+            )
+        }
     }
 
     fun eject(): EjectResult {
         val service = serviceRef?.get() ?: return EjectResult(success = false, mode = "NO_SERVICE")
-        return runOnServiceMainThread(service) {
+        val result = runOnServiceMainThread {
             if (service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) {
                 return@runOnServiceMainThread EjectResult(success = true, mode = "HOME")
             }
@@ -72,10 +91,17 @@ object AccessibilityEjector {
                 mode = if (homeWorked) "BACK_HOME" else if (backWorked) "BACK_ONLY" else "FAILED",
             )
         }
+        MetricsLogger.logEvent(
+            event = "eject_result",
+            fields = mapOf(
+                "success" to result.success,
+                "mode" to result.mode,
+            ),
+        )
+        return result
     }
 
     private fun runOnServiceMainThread(
-        service: AccessibilityService,
         block: () -> EjectResult,
     ): EjectResult {
         if (Looper.myLooper() == Looper.getMainLooper()) {

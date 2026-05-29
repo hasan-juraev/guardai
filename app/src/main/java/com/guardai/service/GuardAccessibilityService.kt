@@ -7,6 +7,7 @@ import android.view.accessibility.AccessibilityEvent
 import com.guardai.accessibility.AccessibilityEjector
 import com.guardai.lock.LockConfig
 import com.guardai.lock.LockManager
+import com.guardai.metrics.MetricsLogger
 import com.guardai.overlay.OverlayManager
 import com.guardai.session.CaptureSessionState
 import com.guardai.tracking.CurrentAppTracker
@@ -42,6 +43,14 @@ class GuardAccessibilityService : AccessibilityService() {
         CurrentAppTracker.update(foregroundPackage)
 
         AccessibilityEjector.maybeEjectForeground(foregroundPackage)?.let { ejectResult ->
+            MetricsLogger.logEvent(
+                event = "pending_eject_attempt",
+                fields = mapOf(
+                    "package" to foregroundPackage,
+                    "success" to ejectResult.success,
+                    "mode" to ejectResult.mode,
+                ),
+            )
             CaptureSessionState.updateLastEjectResult(
                 "${ejectResult.mode} success=${ejectResult.success}",
             )
@@ -51,6 +60,10 @@ class GuardAccessibilityService : AccessibilityService() {
         }
 
         if (lockManager.isLocked(foregroundPackage)) {
+            MetricsLogger.logEvent(
+                event = "locked_app_reopened",
+                fields = mapOf("package" to foregroundPackage),
+            )
             overlayManager.show("Blocked app")
             ejectIfNeeded()
         } else {
@@ -72,6 +85,13 @@ class GuardAccessibilityService : AccessibilityService() {
         if (now - lastEjectTimestamp < LockConfig.EJECT_COOLDOWN_MS) return
         lastEjectTimestamp = now
         val ejectResult = AccessibilityEjector.eject()
+        MetricsLogger.logEvent(
+            event = "relock_eject_result",
+            fields = mapOf(
+                "success" to ejectResult.success,
+                "mode" to ejectResult.mode,
+            ),
+        )
         CaptureSessionState.updateLastEjectResult(
             "${ejectResult.mode} success=${ejectResult.success}",
         )

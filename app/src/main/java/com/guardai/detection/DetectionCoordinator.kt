@@ -7,6 +7,7 @@ import com.guardai.ai.DetectionAction
 import com.guardai.ai.DetectionSummary
 import com.guardai.lock.LockManager
 import com.guardai.lock.LockConfig
+import com.guardai.metrics.MetricsLogger
 import com.guardai.overlay.OverlayManager
 
 class DetectionCoordinator(context: Context) {
@@ -21,6 +22,13 @@ class DetectionCoordinator(context: Context) {
     ): DetectionOutcome {
         if (result.action == DetectionAction.NONE) {
             if (!packageName.isNullOrBlank() && lockManager.isLocked(packageName)) {
+                MetricsLogger.logEvent(
+                    event = "overlay_show_requested",
+                    fields = mapOf(
+                        "reason" to "lock_held",
+                        "package" to packageName,
+                    ),
+                )
                 overlayManager.show()
                 val ejectResult = AccessibilityEjector.maybeEjectForeground(packageName)
                 return DetectionOutcome.LockHeld(packageName, ejectResult)
@@ -29,6 +37,14 @@ class DetectionCoordinator(context: Context) {
             return DetectionOutcome.NoAction
         }
 
+        MetricsLogger.logEvent(
+            event = "overlay_show_requested",
+            fields = mapOf(
+                "reason" to result.action.name,
+                "package" to packageName,
+                "labels" to result.matchedLabels.joinToString("|") { it.name },
+            ),
+        )
         overlayManager.show(
             if (result.matchedLabels.isNotEmpty()) {
                 "Detected ${result.matchedLabels.joinToString { it.name }}"
@@ -41,6 +57,14 @@ class DetectionCoordinator(context: Context) {
             lockManager.lockPackage(
                 packageName = packageName,
                 expiresAt = System.currentTimeMillis() + lockDurationMs,
+            )
+            MetricsLogger.logEvent(
+                event = "package_locked",
+                fields = mapOf(
+                    "package" to packageName,
+                    "lock_duration_ms" to lockDurationMs,
+                    "confidence" to result.confidence,
+                ),
             )
             AccessibilityEjector.requestEject(packageName)
             val ejectResult = AccessibilityEjector.eject()

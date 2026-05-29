@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import com.guardai.metrics.MetricsLogger
 
 class OverlayManager(context: Context) {
 
@@ -29,6 +30,10 @@ class OverlayManager(context: Context) {
 
             windowManager.addView(view, layoutParams())
             overlayView = view
+            MetricsLogger.logEvent(
+                event = "overlay_attached",
+                fields = mapOf("message" to message),
+            )
         }
     }
 
@@ -37,6 +42,7 @@ class OverlayManager(context: Context) {
             val view = overlayView ?: return@post
             windowManager.removeView(view)
             overlayView = null
+            MetricsLogger.logEvent(event = "overlay_hidden")
         }
     }
 
